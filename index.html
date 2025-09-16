@@ -77,7 +77,7 @@
     .diff-veryhard{border-color:#ff3b30;background:linear-gradient(180deg,#321112,#21090a);color:#ff8a82;box-shadow:0 0 0 1px rgba(255,59,48,.25) inset}
     .diff-pink{border-color:#ff56c8;background:radial-gradient(65% 100% at 40% 40%, #ff69d4 0%, #5e0f63 70%);color:#ffe9fb;box-shadow:0 0 0 1px rgba(255,86,200,.25) inset}
     #topWeekControls{display:none}
-  .credit{margin:4px 0 12px 0;display:flex;align-items:center;gap:8px;color:#cfe3f2;font-size:13px}
+    .credit{margin:4px 0 12px 0;display:flex;align-items:center;gap:8px;color:#cfe3f2;font-size:13px}
     .credit .pill{padding:4px 10px;border-radius:999px;background:linear-gradient(180deg,#0e2a40,#091b2b);border:1px solid #2a435a;color:#a8ddff;font-weight:700}
     .credit strong{color:#ffffff}
   </style>
@@ -86,7 +86,6 @@
   <meta property="og:type" content="website" />
   <meta property="og:title" content="냥슐랭 파티 예약판" />
   <meta property="og:description" content="동시간대 최대 3파티 · 실시간 참가/취소 · 주간 보기" />
-  <!-- og:image 는 레포 루트의 og.png(1200x630 권장)로 설정 -->
   <meta property="og:image" content="og.png" />
 </head>
 <body>
@@ -177,7 +176,7 @@
   </div>
 
   <script type="module">
-    // 🔑 Firebase 구성 (사용자님 프로젝트 값 유지)
+    // 🔑 Firebase 구성
     const firebaseConfig = {
       apiKey: "AIzaSyBa0Lo3qikOS495BmX4JAew63QF7h5FnC0",
       authDomain: "party-reservation.firebaseapp.com",
@@ -191,7 +190,6 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
     import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
     import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-
     import { getDocs, collection } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
     const app = initializeApp(firebaseConfig);
@@ -228,7 +226,7 @@
 
     // 분류/던전/난이도 프리셋
     const DUNGEONS = {
-      abyss: [ {id:'mas', name:'마스 던전'} ], // 추후 다른 어비스 던전 추가 가능
+      abyss: [ {id:'mas', name:'마스 던전'} ],
       raid:  [ {id:'glas', name:'글라스기브넨'}, {id:'succ', name:'서큐버스'} ]
     };
     const DIFFS = {
@@ -258,9 +256,14 @@
     onAuthStateChanged(auth, user=>{ if(user){ CURRENT_USER=user; boot(); } });
 
     // ---------- 닉네임 저장 ----------
-    saveNickBtn.onclick = ()=>{ const v = nickEl.value.trim(); if(!v){ alert('닉네임을 입력하세요.'); return; } localStorage.setItem('party_nick', v); alert('닉네임 저장 완료'); };
+    saveNickBtn.onclick = ()=>{
+      const v = nickEl.value.trim();
+      if(!v){ alert('닉네임을 입력하세요.'); return; }
+      localStorage.setItem('party_nick', v);
+      alert('닉네임 저장 완료');
+    };
 
-    // ---------- 픽커 버튼 (가시성 향상) ----------
+    // ---------- 픽커 버튼 ----------
     const safeShow = (el)=>{ if(el.showPicker) el.showPicker(); else el.focus(); };
     btnWeekPicker.onclick = ()=> safeShow(weekStartEl);
     btnWeekPicker2.onclick = ()=> safeShow(weekStart2);
@@ -296,7 +299,12 @@
     refreshDungeons();
 
     // 주간 범위로 파티 생성 날짜 제한
-    function syncEventDateRange(){ const min=new Date(CURRENT_WEEK_MON); const max=new Date(CURRENT_WEEK_MON); max.setDate(max.getDate()+6); eventDateEl.min = `${min.getFullYear()}-${pad2(min.getMonth()+1)}-${pad2(min.getDate())}`; eventDateEl.max = `${max.getFullYear()}-${pad2(max.getMonth()+1)}-${pad2(max.getDate())}`; if(!eventDateEl.value){ eventDateEl.valueAsDate = new Date(CURRENT_WEEK_MON); } }
+    function syncEventDateRange(){
+      const min=new Date(CURRENT_WEEK_MON); const max=new Date(CURRENT_WEEK_MON); max.setDate(max.getDate()+6);
+      eventDateEl.min = `${min.getFullYear()}-${pad2(min.getMonth()+1)}-${pad2(min.getDate())}`;
+      eventDateEl.max = `${max.getFullYear()}-${pad2(max.getMonth()+1)}-${pad2(max.getDate())}`;
+      if(!eventDateEl.value){ eventDateEl.valueAsDate = new Date(CURRENT_WEEK_MON); }
+    }
 
     // ---------- 파티 생성 ----------
     createEventBtn.onclick = async ()=>{
@@ -317,8 +325,16 @@
         // 동시간대 중복 방지
         for(const e of events){ e.members = (e.members||[]).filter(m=>m.uid!==CURRENT_USER.uid); }
         const id = 'e'+Date.now()+Math.random().toString(36).slice(2,7);
-        events.push({ id, cat, dg, diff, cap, title: `${nick}의 파티`, hostUid: CURRENT_USER.uid, hostNick: nick, members:[{uid:CURRENT_USER.uid, nick}], createdAt: Date.now() });
-        data.events = events; tx.set(slotRef, data);
+        events.push({
+          id, cat, dg, diff, cap,
+          title: `${nick}의 파티`,
+          hostUid: CURRENT_USER.uid,
+          hostNick: nick,
+          members:[{uid:CURRENT_USER.uid, nick}],
+          createdAt: Date.now()
+        });
+        data.events = events;
+        tx.set(slotRef, data);
       }).catch(e=> alert(e.message));
 
       // 주간 타임 인덱스 업데이트 (있는 시간만 표시)
@@ -342,7 +358,11 @@
       const wRef = doc(db, 'weeks', CURRENT_WEEK_ID); setDoc(wRef, { times: [] }, { merge: true });
       // 빈 times 자동 복구(기존 슬롯에서 수집)
       hydrateTimesIfMissing(CURRENT_WEEK_ID);
-      unsubWeek = onSnapshot(wRef, (snap)=>{ const times = snap.exists()? (snap.data().times||[]) : []; if(!times || times.length===0){ hydrateTimesIfMissing(CURRENT_WEEK_ID); } attachSlotListeners(times); });
+      unsubWeek = onSnapshot(wRef, (snap)=>{
+        const times = snap.exists()? (snap.data().times||[]) : [];
+        if(!times || times.length===0){ hydrateTimesIfMissing(CURRENT_WEEK_ID); }
+        attachSlotListeners(times);
+      });
     }
 
     async function hydrateTimesIfMissing(weekId){
@@ -375,7 +395,23 @@
       }catch(e){ console.warn('pruneWeekTimeIfEmpty failed', e); }
     }
 
-    function attachSlotListeners(times){ for(const u of slotUnsubs) try{u();}catch(e){} slotUnsubs = []; SLOT_DATA.clear(); if(!times || times.length===0){ renderEvents(); return; } for(let d=0; d<7; d++){ for(const t of [...times].sort()){ const sid = `${d}-${t}`; const sRef = doc(db, 'weeks', CURRENT_WEEK_ID, 'slots', sid); const unsub = onSnapshot(sRef, (snap)=>{ const data = snap.exists()? snap.data(): { events: [] }; SLOT_DATA.set(`${d}|${t}`, data.events||[]); renderEvents(); }); slotUnsubs.push(unsub); } } }
+    function attachSlotListeners(times){
+      for(const u of slotUnsubs) try{u();}catch(e){} slotUnsubs = [];
+      SLOT_DATA.clear();
+      if(!times || times.length===0){ renderEvents(); return; }
+      for(let d=0; d<7; d++){
+        for(const t of [...times].sort()){
+          const sid = `${d}-${t}`;
+          const sRef = doc(db, 'weeks', CURRENT_WEEK_ID, 'slots', sid);
+          const unsub = onSnapshot(sRef, (snap)=>{
+            const data = snap.exists()? snap.data(): { events: [] };
+            SLOT_DATA.set(`${d}|${t}`, data.events||[]);
+            renderEvents();
+          });
+          slotUnsubs.push(unsub);
+        }
+      }
+    }
 
     function labelCat(c){ return c==='abyss'?'어비스':'레이드'; }
     function labelDungeon(id){ return id==='mas'?'마스 던전':(id==='glas'?'글라스기브넨':'서큐버스'); }
@@ -441,7 +477,7 @@
               const sid = `${d}-${item.time}`; joinEvent(CURRENT_WEEK_ID, sid, ev.id, ev.cap||4);
             });
             evEl.querySelector('.btn-leave').addEventListener('click', ()=>{ const sid = `${d}-${item.time}`; leaveEvent(CURRENT_WEEK_ID, sid); });
-            // 호스트 전용 삭제 버튼 추가
+            // 호스트 전용 삭제 버튼
             if(ev.hostUid && CURRENT_USER && ev.hostUid===CURRENT_USER.uid){
               const delBtn = document.createElement('button');
               delBtn.className='btn-delete'; delBtn.textContent='삭제';
@@ -465,23 +501,21 @@
         const snap = await tx.get(ref);
         if(!snap.exists()) throw new Error('해당 파티가 삭제되었을 수 있습니다.');
         const data = snap.data(); let events = data.events||[];
-        // 1) 동시간대 중복 방지: 모든 이벤트에서 내 uid 제거
+        // 1) 동시간대 중복 방지
         for(const e of events){ e.members = (e.members||[]).filter(m=>m.uid!==CURRENT_USER.uid); }
         // 2) 대상 이벤트에 나 추가
         const target = events.find(e=>e.id===eventId);
         if(!target) throw new Error('해당 파티가 없습니다.');
         if((target.members?.length||0) >= (target.cap||cap)) throw new Error('정원이 가득 찼습니다.');
         target.members = [...(target.members||[]), { uid: CURRENT_USER.uid, nick }];
-        // 3) 멤버 0명이 된 이벤트 자동 삭제
+        // 3) 멤버 0 이벤트 제거
         events = events.filter(e => (e.members?.length||0) > 0);
-        // 4) 슬롯 문서 정리
+        // 4) 문서 갱신
         if(events.length===0){ tx.delete(ref); } else { tx.set(ref, { events }, { merge:true }); }
       }).catch(e=>alert(e.message));
-      // 5) 주간 times에서 해당 time이 더 이상 없으면 제거
+      // 5) week.times 정리
       const time = sid.split('-').slice(1).join('-');
       await pruneWeekTimeIfEmpty(weekId, time);
-    }
-      }).catch(e=>alert(e.message));
     }
 
     async function leaveEvent(weekId, sid){
@@ -491,17 +525,26 @@
         let events = (snap.data().events||[]);
         // 내 uid 제거
         let touched=false;
-        for(const e of events){ const before=e.members||[]; const after=before.filter(m=>m.uid!==CURRENT_USER.uid); if(after.length!==before.length){ e.members=after; touched=true; } }
+        for(const e of events){
+          const before=e.members||[];
+          const after=before.filter(m=>m.uid!==CURRENT_USER.uid);
+          if(after.length!==before.length){ e.members=after; touched=true; }
+        }
         // 멤버 0 이벤트 삭제
         events = events.filter(e => (e.members?.length||0) > 0);
         if(!touched && events.length>0) return; // 변경 없음
         if(events.length===0){ tx.delete(ref); } else { tx.set(ref, { events }, { merge:true }); }
       }).catch(e=>console.warn(e));
-      // 주간 times에서 비어있으면 제거
+      // 주간 times에서 비었으면 제거
       const time = sid.split('-').slice(1).join('-');
       await pruneWeekTimeIfEmpty(weekId, time);
+    }
 
-    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c])); }
+    function escapeHtml(s){
+      return String(s||'').replace(/[&<>"']/g, c=>({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
 
     async function deleteEvent(weekId, sid, eventId){
       const ref = doc(db,'weeks',weekId,'slots',sid);
@@ -513,7 +556,6 @@
       const time = sid.split('-').slice(1).join('-');
       await pruneWeekTimeIfEmpty(weekId, time);
     }
-
   </script>
 </body>
 </html>
