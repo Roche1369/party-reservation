@@ -11,32 +11,34 @@
     h1{font-size:22px;margin:0 0 10px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
     .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-    label{font-size:14px;color:var(--muted)} input,select,button{height:36px;border-radius:10px;border:1px solid var(--line);background:#0f141b;color:#e6eef5;padding:0 10px}
+    .section-head{margin-bottom:10px}
+    label{font-size:14px;color:#8aa1b2} input,select,button{height:36px;border-radius:10px;border:1px solid var(--line);background:#0f141b;color:#e6eef5;padding:0 10px}
     button{cursor:pointer}
     button.primary{background:var(--accent);border-color:transparent;color:#00172e;font-weight:700}
     .hint{font-size:12px;color:#99b2c7}
     .muted{color:#8aa1b2}
 
-    /* 이벤트 리스트 */
-    .events{display:flex;flex-direction:column;gap:12px}
+    /* 이벤트 리스트 (있는 시간만) */
+    .events{display:flex;flex-direction:column;gap:16px}
     .day{border:1px solid var(--line);border-radius:14px;overflow:hidden}
-    .day>header{display:flex;align-items:center;justify-content:space-between;background:#0f141b;padding:10px 12px;border-bottom:1px solid var(--line)}
-    .day>header h2{font-size:15px;margin:0;color:#cfe3f2}
-    .slots{padding:10px;display:flex;flex-direction:column;gap:10px}
-    .slot{border:1px solid var(--line);border-radius:12px;padding:10px}
+    .day>header{display:flex;align-items:center;justify-content:space-between;background:#0f141b;padding:12px;border-bottom:1px solid var(--line)}
+    .day>header h2{font-size:15px;margin:0;color:#cfe3f2;display:flex;gap:8px;align-items:center}
+    .day>header .date{font-size:12px;color:#8aa1b2;border:1px solid var(--line);padding:2px 8px;border-radius:999px}
+    .slots{padding:14px;display:flex;flex-direction:column;gap:12px}
+    .slot{border:1px solid var(--line);border-radius:12px;padding:12px}
     .slot .time{font-weight:700;color:#bcd0df;margin-bottom:8px}
-    .event{display:grid;grid-template-columns:1fr auto;gap:8px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#0e131a;margin-top:8px}
-    .label{display:inline-flex;gap:6px;align-items:center}
+    .event{display:grid;grid-template-columns:1fr auto;gap:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:#0e131a;margin-top:8px}
+    .label{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
     .badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:#bcd0df}
-    .names{font-size:12px;color:#cfe3f2;line-height:1.4}
+    .title{font-weight:700;margin:6px 0 4px 0}
+    .names{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid #21354a;background:linear-gradient(180deg,#0f1b29,#0b131d);color:#cfe3f2}
     .btns{display:flex;gap:6px}
     .btn-join{background:#21354a;color:#cfe3f2}
     .btn-leave{background:#2a1b1b;color:#ffd5d5;border-color:#512b2b}
     .count{font-weight:700}
     .full{border-color:#3a2a12;background:#1a1410}
     .full .count{color:var(--warn)}
-
-    /* 모바일에서도 일요일 잘림 방지: 리스트는 가로 스크롤 없음 */
   </style>
 </head>
 <body>
@@ -92,7 +94,7 @@
 
     <!-- 주간 파티 목록 (있는 시간만 표시) -->
     <div class="card">
-      <div class="row" style="justify-content:space-between">
+      <div class="row section-head" style="justify-content:space-between">
         <strong>이번 주 파티 목록</strong>
         <span class="muted" id="weekLabel"></span>
       </div>
@@ -159,16 +161,13 @@
     weekStartEl.valueAsDate = defMon;
 
     let CURRENT_WEEK_ID = weekIdFromDate(defMon);
+    let CURRENT_WEEK_MON = defMon; // 날짜 표기용
     let CURRENT_USER = null;
 
     function weekIdFromDate(d){
       const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0');
       return `${y}-${m}-${day}`;
     }
-    function dayIdxFromDate(d, mon){
-      return Math.floor((d - mon)/86400000); // 0..6
-    }
-    function slotId(dayIdx, time){ return `${dayIdx}-${time}`; }
     function pad2(n){ return String(n).padStart(2,'0'); }
 
     // ---------- 인증 ----------
@@ -182,7 +181,7 @@
     };
 
     // ---------- 주간 이동 ----------
-    goWeekBtn.onclick = ()=>{ const d=weekStartEl.valueAsDate; if(!d){alert('날짜를 선택하세요.');return;} CURRENT_WEEK_ID = weekIdFromDate(mondayOf(d)); boot(); };
+    goWeekBtn.onclick = ()=>{ const d=weekStartEl.valueAsDate; if(!d){alert('날짜를 선택하세요.');return;} CURRENT_WEEK_MON=mondayOf(d); CURRENT_WEEK_ID = weekIdFromDate(CURRENT_WEEK_MON); boot(); };
 
     // ---------- 파티 생성 폼 ----------
     function refreshDiffs(){
@@ -202,7 +201,7 @@
 
       const time = eventTimeEl.value || '20:00';
       const type = eventTypeEl.value; const diff = eventDiffEl.value; const cap = CAP[type] || 4;
-      const sid = slotId(diffDays, time);
+      const sid = `${diffDays}-${time}`;
 
       const slotRef = doc(db, 'weeks', CURRENT_WEEK_ID, 'slots', sid);
       await runTransaction(db, async (tx)=>{
@@ -215,7 +214,7 @@
         for(const e of events){ e.members = (e.members||[]).filter(m=>m.uid!==CURRENT_USER.uid); }
 
         const id = 'e'+Date.now()+Math.random().toString(36).slice(2,7);
-        events.push({ id, type, diff, cap, members:[{uid:CURRENT_USER.uid, nick}], hostUid: CURRENT_USER.uid, createdAt: Date.now() });
+        events.push({ id, type, diff, cap, title: `${nick}의 파티`, hostUid: CURRENT_USER.uid, hostNick: nick, members:[{uid:CURRENT_USER.uid, nick}], createdAt: Date.now() });
         data.events = events;
         tx.set(slotRef, data);
       }).catch(e=> alert(e.message));
@@ -230,16 +229,16 @@
     };
 
     // ---------- 실시간 구독 & 렌더 ----------
-    let unsubWeek = null; let slotUnsubs = [];
+    let unsubWeek = null; let slotUnsubs = []; const SLOT_DATA = new Map();
     function unsubAll(){ if(unsubWeek) try{unsubWeek();}catch(e){} unsubWeek=null; for(const u of slotUnsubs) try{u();}catch(e){} slotUnsubs=[]; }
 
     function boot(){
       unsubAll();
-      const mon = new Date(weekStartEl.value); const sun=new Date(mon); sun.setDate(mon.getDate()+6);
-      weekLabel.textContent = `${mon.getFullYear()}-${pad2(mon.getMonth()+1)}-${pad2(mon.getDate())} ~ ${sun.getFullYear()}-${pad2(sun.getMonth()+1)}-${pad2(sun.getDate())}`;
+      const mon = new Date(weekStartEl.value); CURRENT_WEEK_MON = mondayOf(mon);
+      const sun=new Date(CURRENT_WEEK_MON); sun.setDate(CURRENT_WEEK_MON.getDate()+6);
+      weekLabel.textContent = `${CURRENT_WEEK_MON.getFullYear()}-${pad2(CURRENT_WEEK_MON.getMonth()+1)}-${pad2(CURRENT_WEEK_MON.getDate())} ~ ${sun.getFullYear()}-${pad2(sun.getMonth()+1)}-${pad2(sun.getDate())}`;
 
       const wRef = doc(db, 'weeks', CURRENT_WEEK_ID);
-      // 주 문서 보장
       setDoc(wRef, { times: [] }, { merge: true });
 
       unsubWeek = onSnapshot(wRef, (snap)=>{
@@ -248,21 +247,13 @@
       });
     }
 
-    const SLOT_DATA = new Map(); // key: d|time -> events[]
-
     function attachSlotListeners(times){
-      // 기존 슬롯 구독 해제
       for(const u of slotUnsubs) try{u();}catch(e){}
-      slotUnsubs = [];
-      SLOT_DATA.clear();
-
-      // 선택된 times가 없으면 리스트 비우기
+      slotUnsubs = []; SLOT_DATA.clear();
       if(!times || times.length===0){ renderEvents(); return; }
-
-      // 각 요일×시간 슬롯 구독
       for(let d=0; d<7; d++){
-        for(const t of [...times].sort()){ // 정렬
-          const sid = slotId(d, t);
+        for(const t of [...times].sort()){
+          const sid = `${d}-${t}`;
           const sRef = doc(db, 'weeks', CURRENT_WEEK_ID, 'slots', sid);
           const unsub = onSnapshot(sRef, (snap)=>{
             const data = snap.exists()? snap.data(): { events: [] };
@@ -275,23 +266,20 @@
     }
 
     function renderEvents(){
-      // 요일별로, 그리고 시간 오름차순으로, events가 있는 슬롯만 표시
       eventsContainer.innerHTML='';
       let any=false;
       for(let d=0; d<7; d++){
-        // 수집
         const list=[];
         for(const [key, events] of SLOT_DATA.entries()){
           const [dd, time] = key.split('|');
           if(Number(dd)===d && Array.isArray(events) && events.length>0){ list.push({ time, events }); }
         }
-        if(list.length===0) continue;
-        any=true;
-        list.sort((a,b)=> a.time.localeCompare(b.time));
+        if(list.length===0) continue; any=true; list.sort((a,b)=> a.time.localeCompare(b.time));
 
-        // day 블록
         const dayEl=document.createElement('section'); dayEl.className='day';
-        dayEl.innerHTML = `<header><h2>${DAYS[d]}</h2></header>`;
+        const dateObj=new Date(CURRENT_WEEK_MON); dateObj.setDate(CURRENT_WEEK_MON.getDate()+d);
+        const dateStr=`${pad2(dateObj.getMonth()+1)}-${pad2(dateObj.getDate())}`;
+        dayEl.innerHTML = `<header><h2>${DAYS[d]} <span class="date">${dateStr}</span></h2></header>`;
         const slotsEl=document.createElement('div'); slotsEl.className='slots';
 
         for(const item of list){
@@ -299,7 +287,9 @@
           slotEl.innerHTML = `<div class="time">${item.time}</div>`;
           for(const ev of item.events){
             const full = (ev.members?.length||0) >= (ev.cap||4);
-            const names = (ev.members||[]).map(m=>escapeHtml(m.nick)).join(', ') || '<span class="muted">(비어있음)</span>';
+            const host = ev.hostNick || (ev.members?.[0]?.nick || '파티');
+            const title = ev.title || `${host}의 파티`;
+            const names = (ev.members||[]).map(m=>`<span class="chip">${escapeHtml(m.nick)}</span>`).join('') || '<span class="muted">(비어있음)</span>';
             const evEl=document.createElement('div'); evEl.className='event'+(full?' full':'');
             evEl.innerHTML = `
               <div>
@@ -308,20 +298,20 @@
                   <span class="badge">${ev.diff}</span>
                   <span class="count">${(ev.members?.length||0)}/${ev.cap||4}</span>
                 </div>
+                <div class="title">${escapeHtml(title)}</div>
                 <div class="names">${names}</div>
               </div>
               <div class="btns">
                 <button class="btn-join">참가</button>
                 <button class="btn-leave">취소</button>
               </div>`;
-            // 이벤트 핸들러
             evEl.querySelector('.btn-join').addEventListener('click', ()=>{
               const nick=(nickEl.value||'').trim(); if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
-              const sid = slotId(d, item.time);
-              joinEvent(CURRENT_WEEK_ID, sid, ev.id, ev.cap||4, d, item.time);
+              const sid = `${d}-${item.time}`;
+              joinEvent(CURRENT_WEEK_ID, sid, ev.id, ev.cap||4);
             });
             evEl.querySelector('.btn-leave').addEventListener('click', ()=>{
-              const sid = slotId(d, item.time); leaveEvent(CURRENT_WEEK_ID, sid);
+              const sid = `${d}-${item.time}`; leaveEvent(CURRENT_WEEK_ID, sid);
             });
             slotEl.appendChild(evEl);
           }
@@ -333,7 +323,7 @@
       emptyHint.style.display = any? 'none':'block';
     }
 
-    async function joinEvent(weekId, sid, eventId, cap, dayIdx, time){
+    async function joinEvent(weekId, sid, eventId, cap){
       const nick=(nickEl.value||'').trim(); if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
       const ref = doc(db, 'weeks', weekId, 'slots', sid);
       await runTransaction(db, async (tx)=>{
@@ -361,7 +351,7 @@
     }
 
     function labelType(t){ return t==='abyss'?'어비스':(t==='glas'?'글라스기브넨':'서큐버스'); }
-    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c])); }
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c])); }
 
   </script>
 </body>
