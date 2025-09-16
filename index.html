@@ -80,6 +80,17 @@
     .credit{margin:4px 0 12px 0;display:flex;align-items:center;gap:8px;color:#cfe3f2;font-size:13px}
     .credit .pill{padding:4px 10px;border-radius:999px;background:linear-gradient(180deg,#0e2a40,#091b2b);border:1px solid #2a435a;color:#a8ddff;font-weight:700}
     .credit strong{color:#ffffff}
+    /* 내가 참가한 파티 하이라이트 */
+    .event.mine{
+      border-color:#69d3ff;
+      box-shadow:0 0 0 1px rgba(105,211,255,.25) inset, 0 0 14px rgba(100,169,255,.25);
+    }
+    .badge.mine{
+      border-color:#69d3ff;
+      background:linear-gradient(180deg,#0f2b3d,#0b1d2b);
+      color:#cfefff;
+      font-weight:700;
+    }
   </style>
   <meta name="theme-color" content="#0b0f14" />
   <!-- 카카오톡 미리보기(OG) -->
@@ -437,13 +448,13 @@
           if(Number(dd)===d && Array.isArray(events) && events.length>0){ list.push({ time, events }); }
         }
         if(list.length===0) continue; any=true; list.sort((a,b)=> a.time.localeCompare(b.time));
-
+    
         const dayEl=document.createElement('section'); dayEl.className='day';
         const dateObj=new Date(CURRENT_WEEK_MON); dateObj.setDate(CURRENT_WEEK_MON.getDate()+d);
         const dateStr=`${pad2(dateObj.getMonth()+1)}-${pad2(dateObj.getDate())}`;
         dayEl.innerHTML = `<header><h2>${DAYS[d]} <span class="date">${dateStr}</span></h2></header>`;
         const slotsEl=document.createElement('div'); slotsEl.className='slots';
-
+    
         for(const item of list){
           const slotEl=document.createElement('div'); slotEl.className='slot';
           slotEl.innerHTML = `<div class="time">${item.time}</div>`;
@@ -455,8 +466,14 @@
             const full = (ev.members?.length||0) >= (ev.cap||4);
             const host = ev.hostNick || (ev.members?.[0]?.nick || '파티');
             const title = ev.title || `${host}의 파티`;
+    
+            // ✅ 내가 참가한 파티인지 판별
+            const isMine = !!(CURRENT_USER && (ev.members||[]).some(m=>m.uid===CURRENT_USER.uid));
+    
             const names = (ev.members||[]).map(m=>`<span class="chip">${escapeHtml(m.nick)}</span>`).join('') || '<span class="muted">(비어있음)</span>';
-            const evEl=document.createElement('div'); evEl.className='event'+(full?' full':'');
+            const evEl=document.createElement('div');
+            evEl.className = 'event' + (full?' full':'') + (isMine?' mine':'');
+    
             evEl.innerHTML = `
               <div>
                 <div class="label">
@@ -464,6 +481,7 @@
                   <span class="badge ${dungeonClass(dg)}">${labelDungeon(dg)}</span>
                   <span class="badge diff ${diffCls}">${ev.diff}</span>
                   <span class="count">${(ev.members?.length||0)}/${ev.cap||4}</span>
+                  ${isMine ? '<span class="badge mine">내 파티</span>' : ''}
                 </div>
                 <div class="title">${escapeHtml(title)}</div>
                 <div class="names">${names}</div>
@@ -472,18 +490,34 @@
                 <button class="btn-join">참가</button>
                 <button class="btn-leave">취소</button>
               </div>`;
-            evEl.querySelector('.btn-join').addEventListener('click', ()=>{
+    
+            const joinBtn = evEl.querySelector('.btn-join');
+            const leaveBtn = evEl.querySelector('.btn-leave');
+    
+            // 참가/취소 버튼 동작
+            joinBtn.addEventListener('click', ()=>{
               const nick=(nickEl.value||'').trim(); if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
               const sid = `${d}-${item.time}`; joinEvent(CURRENT_WEEK_ID, sid, ev.id, ev.cap||4);
             });
-            evEl.querySelector('.btn-leave').addEventListener('click', ()=>{ const sid = `${d}-${item.time}`; leaveEvent(CURRENT_WEEK_ID, sid); });
+            leaveBtn.addEventListener('click', ()=>{
+              const sid = `${d}-${item.time}`; leaveEvent(CURRENT_WEEK_ID, sid);
+            });
+    
+            // ✅ 내 파티면 참가 버튼 비활성(이미 들어가 있으니)
+            if(isMine){ joinBtn.disabled = true; joinBtn.style.opacity='0.6'; joinBtn.title='이미 참가한 파티입니다'; }
+            // 정원 찼으면 참가 버튼 비활성
+            if(full && !isMine){ joinBtn.disabled = true; joinBtn.style.opacity='0.6'; joinBtn.title='정원이 가득 찼습니다'; }
+    
             // 호스트 전용 삭제 버튼
             if(ev.hostUid && CURRENT_USER && ev.hostUid===CURRENT_USER.uid){
               const delBtn = document.createElement('button');
               delBtn.className='btn-delete'; delBtn.textContent='삭제';
               evEl.querySelector('.btns').appendChild(delBtn);
-              delBtn.addEventListener('click', ()=>{ const sid = `${d}-${item.time}`; deleteEvent(CURRENT_WEEK_ID, sid, ev.id); });
+              delBtn.addEventListener('click', ()=>{
+                const sid = `${d}-${item.time}`; deleteEvent(CURRENT_WEEK_ID, sid, ev.id);
+              });
             }
+        
             slotEl.appendChild(evEl);
           }
           slotsEl.appendChild(slotEl);
@@ -493,6 +527,7 @@
       }
       emptyHint.style.display = any? 'none':'block';
     }
+
 
     async function joinEvent(weekId, sid, eventId, cap){
       const nick=(nickEl.value||'').trim(); if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
@@ -559,3 +594,4 @@
   </script>
 </body>
 </html>
+
