@@ -31,9 +31,8 @@
     .btn-leave{background:#2a1b1b;color:#ffd5d5;border-color:#512b2b}
     .full{border-color:#3a2a12;background:#1a1410}
     .full .count{color:var(--warn)}
-    .muted{color:var(--muted)}
-    .foot{margin-top:10px;color:var(--muted);font-size:12px}
-    .ok{color:var(--ok)} .danger{color:var(--danger)}
+    .muted{color:#8aa1b2}
+    .foot{margin-top:10px;color:#8aa1b2;font-size:12px}
     .hint{font-size:12px;color:#99b2c7}
     .flex-gap{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   </style>
@@ -87,7 +86,7 @@
 
   <!-- Firebase SDKs (v10) -->
   <script type="module">
-    // 🔑 Firebase 웹앱 구성: 콘솔에서 발급받은 값으로 교체
+    // ✅ Firebase 구성 (사용자님 프로젝트 값으로 이미 채움)
     const firebaseConfig = {
       apiKey: "AIzaSyBa0Lo3qikOS495BmX4JAew63QF7h5FnC0",
       authDomain: "party-reservation.firebaseapp.com",
@@ -100,14 +99,263 @@
 
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
     import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-    import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+    import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // 이하 로직 동일 (파티 예약/취소, UI 렌더링, 트랜잭션 처리 등)
-    // ... (캔버스에 올린 원본 코드 내용 그대로 유지)
+    // ---------- 유틸 ----------
+    const DAYS = ['월','화','수','목','금','토','일'];
+    let TIMES = ['20:00','22:00'];
+
+    const nickEl = document.getElementById('nick');
+    const saveNickBtn = document.getElementById('saveNick');
+    const weekStartEl = document.getElementById('weekStart');
+    const goWeekBtn = document.getElementById('goWeek');
+    const capEl = document.getElementById('capacity');
+    const timesInput = document.getElementById('timesInput');
+    const applyTimesBtn = document.getElementById('applyTimes');
+    const grid = document.getElementById('grid');
+
+    // 로컬 저장 닉/시간대 로드
+    nickEl.value = localStorage.getItem('party_nick') || '';
+    const savedTimes = localStorage.getItem('party_times');
+    if (savedTimes) TIMES = savedTimes.split(',').map(s=>s.trim()).filter(Boolean);
+    timesInput.value = TIMES.join(',');
+
+    function mondayOf(date){
+      const d = new Date(date);
+      const day = (d.getDay()+6)%7; // Mon=0
+      d.setDate(d.getDate()-day);
+      d.setHours(0,0,0,0);
+      return d;
+    }
+    const defMon = mondayOf(new Date());
+    weekStartEl.valueAsDate = defMon;
+
+    let CURRENT_WEEK_ID = weekIdFromDate(defMon);
+    let CURRENT_USER = null;
+    let unsubscribers = [];
+
+    function weekIdFromDate(d){
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`; // 주 시작 월요일
+    }
+
+    function slotId(dayIdx, time){
+      return `${dayIdx}-${time}`; // 0~6-20:00
+    }
+
+    // ---------- 인증 ----------
+    signInAnonymously(auth).catch((e)=>{
+      console.error('[익명 로그인 실패]', e);
+      alert('로그인 초기화에 실패했습니다. GitHub Pages 주소로 접속 중인지 확인하세요.\n오류: '+ e.code);
+    });
+
+    onAuthStateChanged(auth, (user)=>{
+      if (user) {
+        CURRENT_USER = user;
+        renderWeek();
+      }
+    });
+
+    saveNickBtn.onclick = ()=>{
+      const v = nickEl.value.trim();
+      if (!v) { alert('닉네임을 입력하세요.'); return; }
+      localStorage.setItem('party_nick', v);
+      alert('닉네임 저장 완료');
+    };
+
+    applyTimesBtn.onclick = ()=>{
+      const arr = timesInput.value.split(',').map(s=>s.trim()).filter(Boolean);
+      if (arr.length===0) { alert('최소 1개 시간대를 입력하세요.'); return; }
+      TIMES = arr; localStorage.setItem('party_times', TIMES.join(','));
+      renderWeek();
+    };
+
+    goWeekBtn.onclick = ()=>{
+      const d = weekStartEl.valueAsDate; if(!d){ alert('날짜를 선택하세요.'); return; }
+      CURRENT_WEEK_ID = weekIdFromDate(mondayOf(d));
+      renderWeek();
+    };
+
+    // ---------- Firestore I/O ----------
+    async function ensureSlotDoc(weekId, slot){
+      const ref = doc(db, 'weeks', weekId, 'slots', slot);
+      const snap = await getDoc(ref);
+      if(!snap.exists()){
+        await setDoc(ref, { parties: { '1': [], '2': [], '3': [] }, capacity: { '1': 8, '2': 8, '3': 8 } });
+      }
+      return ref;
+    }
+
+    function listenWeek(weekId, onData){
+      unsubAll();
+      for(let d=0; d<7; d++){
+        for(const t of TIMES){
+          const sid = slotId(d,t);
+          const ref = doc(db, 'weeks', weekId, 'slots', sid);
+          const unsub = onSnapshot(ref, (snap)=>{
+            onData(d, t, snap.exists()? snap.data(): { parties:{'1':[], '2':[], '3':[]}, capacity:{'1':8,'2':8,'3':8} });
+          });
+          unsubscribers.push(unsub);
+        }
+      }
+    }
+
+    function unsubAll(){
+      for(const u of unsubscribers) try{u();}catch(e){}
+      unsubscribers = [];
+    }
+
+    async function joinParty(weekId, dayIdx, time, partyNo){
+      const nick = (nickEl.value||'').trim();
+      if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
+      const cap = parseInt(capEl.value,10);
+      const sid = slotId(dayIdx, time);
+      const ref = await ensureSlotDoc(weekId, sid);
+
+      await runTransaction(db, async (tx)=>{
+        const docSnap = await tx.get(ref);
+        let data = docSnap.exists()? docSnap.data(): { parties:{'1':[], '2':[], '3':[]}, capacity:{'1':8,'2':8,'3':8} };
+
+        // 주간 기본정원 동기화
+        for(const k of ['1','2','3']) data.capacity[k] = cap;
+
+        // 같은 시간대 중복참여 방지 → 모든 파티에서 내 uid 제거
+        for(const k of ['1','2','3']){
+          data.parties[k] = data.parties[k].filter(p=>p.uid!==CURRENT_USER.uid);
+        }
+
+        const target = data.parties[String(partyNo)] || [];
+        const limit = data.capacity[String(partyNo)] || cap;
+        if(target.length >= limit) throw new Error('정원이 가득 찼습니다.');
+
+        target.push({ uid: CURRENT_USER.uid, nick });
+        data.parties[String(partyNo)] = target;
+
+        tx.set(ref, data);
+      }).catch(e=>{
+        alert(e.message);
+      });
+    }
+
+    async function leaveParty(weekId, dayIdx, time){
+      const sid = slotId(dayIdx, time);
+      const ref = await ensureSlotDoc(weekId, sid);
+      await runTransaction(db, async (tx)=>{
+        const snap = await tx.get(ref);
+        if(!snap.exists()) return;
+        const data = snap.data();
+        let changed = false;
+        for(const k of ['1','2','3']){
+          const before = data.parties[k];
+          const after = before.filter(p=>p.uid!==CURRENT_USER.uid);
+          if(after.length!==before.length){ data.parties[k]=after; changed = true; }
+        }
+        if(changed) tx.set(ref, data);
+      });
+    }
+
+    // ---------- 렌더 ----------
+    const cellCache = new Map(); // key: d|t → element refs
+
+    function renderWeek(){
+      // 테이블 골격 렌더
+      const headerDays = DAYS.map((d,i)=>`<th>${d}</th>`).join('');
+      let html = `<table><thead><tr><th style="width:100px">시간</th>${headerDays}</tr></thead><tbody>`;
+      for(const t of TIMES){
+        html += `<tr><td class="time">${t}</td>`;
+        for(let d=0; d<7; d++){
+          const key = `${d}|${t}`;
+          html += `<td><div id="cell-${key}"></div></td>`;
+        }
+        html += `</tr>`;
+      }
+      html += `</tbody></table>`;
+      grid.innerHTML = html;
+
+      // 캐시 초기화
+      cellCache.clear();
+      for(const t of TIMES){
+        for(let d=0; d<7; d++){
+          const key = `${d}|${t}`;
+          cellCache.set(key, document.getElementById(`cell-${key}`));
+        }
+      }
+
+      // 데이터 구독 시작
+      listenWeek(CURRENT_WEEK_ID, (d, t, data)=>{
+        drawCell(d, t, data);
+      });
+    }
+
+    function drawCell(dayIdx, time, data){
+      const key = `${dayIdx}|${time}`;
+      const el = cellCache.get(key);
+      if(!el) return;
+      const parties = data?.parties || { '1':[], '2':[], '3':[] };
+      const cap = parseInt(capEl.value,10);
+
+      let inner = '';
+      for(const k of ['1','2','3']){
+        const list = parties[k] || [];
+        const full = list.length >= (data.capacity?.[k] ?? cap);
+        inner += `
+          <div class="party ${full? 'full':''}">
+            <div class="p-head">
+              <span class="badge">파티 ${k}</span>
+              <span class="count">${list.length}/${data.capacity?.[k] ?? cap}</span>
+            </div>
+            <div class="btns">
+              <button class="btn-join" data-party="${k}">참가</button>
+              <button class="btn-leave">취소</button>
+            </div>
+            <div class="names">${list.length? list.map(p=>escapeHtml(p.nick)).join(', ') : '<span class="muted">(비어있음)</span>'}</div>
+          </div>`;
+      }
+      el.innerHTML = inner;
+
+      // 바인딩
+      el.querySelectorAll('.btn-join').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const pno = btn.getAttribute('data-party');
+          joinParty(CURRENT_WEEK_ID, dayIdx, time, pno);
+        });
+      });
+      el.querySelectorAll('.btn-leave').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          leaveParty(CURRENT_WEEK_ID, dayIdx, time);
+        });
+      });
+    }
+
+    function escapeHtml(s){
+      return s.replace(/[&<>"']/g, (c)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c]));
+    }
+
+    // 최초 렌더 (익명 로그인 콜백에서 다시 렌더됨)
+    renderWeek();
   </script>
+
+  <!--
+  ============================
+  배포 & 설정 가이드 (요약)
+  ============================
+  1) Firebase 프로젝트 생성 → Firestore Database 생성 (테스트 모드 권장)
+  2) Authentication → Sign-in method → Anonymous 활성화
+  3) 위 firebaseConfig에 SDK 구성값을 붙여넣음(이미 적용됨)
+  4) GitHub Pages에 이 파일을 업로드 → 배포 URL을 카톡 공지에 고정
+  5) Authentication → 허용 도메인에 {username}.github.io 추가
+
+  ✓ 기능 요약
+    - 주간 시작일(월요일) 기준 전체 슬롯 표시
+    - 같은 시간대 3개 파티(1~3) / 정원 4~8 (드롭다운)
+    - 닉 저장 후 참가/취소 (중복참여 방지)
+    - 시간대 쉼표 편집
+  -->
 </body>
 </html>
