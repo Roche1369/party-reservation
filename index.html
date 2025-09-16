@@ -250,6 +250,15 @@
     function labelType(t){ return t==='abyss'?'어비스':(t==='glas'?'글라스기브넨':'서큐버스'); }
     function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c])); }
 
+      function diffClass(name){
+      const n = String(name||'').replace(/\s+/g,'');
+      if(n==='입문') return 'diff-easy';
+      if(n==='어려움') return 'diff-hard';
+      if(n==='매우어려움') return 'diff-veryhard';
+      if(n==='입문~지옥6' || n==='입분~지6') return 'diff-pink';
+      if(/^지옥\d+$/.test(n)) return 'diff-veryhard';
+      return '';
+    }
   </script>
 </body>
 </html>
