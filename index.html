@@ -56,6 +56,7 @@
     .names{display:flex;gap:6px;flex-wrap:wrap}
     .chip{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid #294f77;background:linear-gradient(180deg,#10263c,#0b1624);color:#d3e8ff}
     .btns{display:flex;gap:6px}
+    .btn-delete{background:#3a1020;color:#ffd6e2;border:1px solid #5a1a31;border-radius:10px;height:36px;padding:0 10px;cursor:pointer}
     .btn-join{background:#21354a;color:#cfe3f2}
     .btn-leave{background:#2a1b1b;color:#ffd5d5;border-color:#512b2b}
     .count{font-weight:700}
@@ -356,6 +357,24 @@
       }catch(e){ console.warn('hydrateTimesIfMissing failed', e); }
     }
 
+    async function pruneWeekTimeIfEmpty(weekId, time){
+      try{
+        // 해당 주의 같은 time에 대해 요일 0..6 슬롯 존재 여부 확인
+        for(let d=0; d<7; d++){
+          const sRef = doc(db,'weeks',weekId,'slots',`${d}-${time}`);
+          const sSnap = await getDoc(sRef);
+          if(sSnap.exists()) return; // 아직 남아있음
+        }
+        // 전부 없으면 week.times에서 제거
+        const wRef = doc(db,'weeks',weekId);
+        const wSnap = await getDoc(wRef);
+        if(!wSnap.exists()) return;
+        const times = wSnap.data().times||[];
+        const next = times.filter(t=>t!==time);
+        await setDoc(wRef, { times: next }, { merge:true });
+      }catch(e){ console.warn('pruneWeekTimeIfEmpty failed', e); }
+    }
+
     function attachSlotListeners(times){ for(const u of slotUnsubs) try{u();}catch(e){} slotUnsubs = []; SLOT_DATA.clear(); if(!times || times.length===0){ renderEvents(); return; } for(let d=0; d<7; d++){ for(const t of [...times].sort()){ const sid = `${d}-${t}`; const sRef = doc(db, 'weeks', CURRENT_WEEK_ID, 'slots', sid); const unsub = onSnapshot(sRef, (snap)=>{ const data = snap.exists()? snap.data(): { events: [] }; SLOT_DATA.set(`${d}|${t}`, data.events||[]); renderEvents(); }); slotUnsubs.push(unsub); } } }
 
     function labelCat(c){ return c==='abyss'?'어비스':'레이드'; }
@@ -422,6 +441,13 @@
               const sid = `${d}-${item.time}`; joinEvent(CURRENT_WEEK_ID, sid, ev.id, ev.cap||4);
             });
             evEl.querySelector('.btn-leave').addEventListener('click', ()=>{ const sid = `${d}-${item.time}`; leaveEvent(CURRENT_WEEK_ID, sid); });
+            // 호스트 전용 삭제 버튼 추가
+            if(ev.hostUid && CURRENT_USER && ev.hostUid===CURRENT_USER.uid){
+              const delBtn = document.createElement('button');
+              delBtn.className='btn-delete'; delBtn.textContent='삭제';
+              evEl.querySelector('.btns').appendChild(delBtn);
+              delBtn.addEventListener('click', ()=>{ const sid = `${d}-${item.time}`; deleteEvent(CURRENT_WEEK_ID, sid, ev.id); });
+            }
             slotEl.appendChild(evEl);
           }
           slotsEl.appendChild(slotEl);
@@ -434,6 +460,27 @@
 
     async function joinEvent(weekId, sid, eventId, cap){
       const nick=(nickEl.value||'').trim(); if(!nick){ alert('닉네임을 먼저 저장하세요.'); return; }
+      const ref = doc(db, 'weeks', weekId, 'slots', sid);
+      await runTransaction(db, async (tx)=>{
+        const snap = await tx.get(ref);
+        if(!snap.exists()) throw new Error('해당 파티가 삭제되었을 수 있습니다.');
+        const data = snap.data(); let events = data.events||[];
+        // 1) 동시간대 중복 방지: 모든 이벤트에서 내 uid 제거
+        for(const e of events){ e.members = (e.members||[]).filter(m=>m.uid!==CURRENT_USER.uid); }
+        // 2) 대상 이벤트에 나 추가
+        const target = events.find(e=>e.id===eventId);
+        if(!target) throw new Error('해당 파티가 없습니다.');
+        if((target.members?.length||0) >= (target.cap||cap)) throw new Error('정원이 가득 찼습니다.');
+        target.members = [...(target.members||[]), { uid: CURRENT_USER.uid, nick }];
+        // 3) 멤버 0명이 된 이벤트 자동 삭제
+        events = events.filter(e => (e.members?.length||0) > 0);
+        // 4) 슬롯 문서 정리
+        if(events.length===0){ tx.delete(ref); } else { tx.set(ref, { events }, { merge:true }); }
+      }).catch(e=>alert(e.message));
+      // 5) 주간 times에서 해당 time이 더 이상 없으면 제거
+      const time = sid.split('-').slice(1).join('-');
+      await pruneWeekTimeIfEmpty(weekId, time);
+    }
       const ref = doc(db, 'weeks', weekId, 'slots', sid);
       await runTransaction(db, async (tx)=>{
         const snap = await tx.get(ref);
@@ -452,13 +499,35 @@
       const ref = doc(db, 'weeks', weekId, 'slots', sid);
       await runTransaction(db, async (tx)=>{
         const snap = await tx.get(ref); if(!snap.exists()) return;
-        const data = snap.data(); const events=data.events||[];
-        let changed=false; for(const e of events){ const before=e.members||[]; const after=before.filter(m=>m.uid!==CURRENT_USER.uid); if(after.length!==before.length){ e.members=after; changed=true; } }
+        let events = (snap.data().events||[]);
+        // 내 uid 제거
+        let touched=false;
+        for(const e of events){ const before=e.members||[]; const after=before.filter(m=>m.uid!==CURRENT_USER.uid); if(after.length!==before.length){ e.members=after; touched=true; } }
+        // 멤버 0 이벤트 삭제
+        events = events.filter(e => (e.members?.length||0) > 0);
+        if(!touched && events.length>0) return; // 변경 없음
+        if(events.length===0){ tx.delete(ref); } else { tx.set(ref, { events }, { merge:true }); }
+      }).catch(e=>console.warn(e));
+      // 주간 times에서 비어있으면 제거
+      const time = sid.split('-').slice(1).join('-');
+      await pruneWeekTimeIfEmpty(weekId, time);
+    } }
         if(changed) tx.set(ref, { events }, { merge:true });
       });
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[c])); }
+
+    async function deleteEvent(weekId, sid, eventId){
+      const ref = doc(db,'weeks',weekId,'slots',sid);
+      await runTransaction(db, async (tx)=>{
+        const snap = await tx.get(ref); if(!snap.exists()) return;
+        let events = (snap.data().events||[]).filter(e=>e.id!==eventId);
+        if(events.length===0){ tx.delete(ref); } else { tx.set(ref,{ events },{ merge:true }); }
+      }).catch(e=>alert(e.message));
+      const time = sid.split('-').slice(1).join('-');
+      await pruneWeekTimeIfEmpty(weekId, time);
+    }[c])); }
 
   </script>
 </body>
